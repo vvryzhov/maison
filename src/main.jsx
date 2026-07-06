@@ -51,7 +51,11 @@ const defaultSettings = {
 function money(v){return new Intl.NumberFormat('ru-RU',{style:'currency',currency:'RUB',maximumFractionDigits:0}).format(Number(v||0))}
 function load(key, fallback){try{return JSON.parse(localStorage.getItem(key)) ?? fallback}catch{return fallback}}
 function save(key, value){localStorage.setItem(key, JSON.stringify(value))}
-function routeFromHash(){return location.hash.replace('#','') || '/'}
+function routeFromHash(){
+  const full = location.hash.replace('#','') || '/';
+  const path = full.split('?')[0] || '/';
+  return {path, full};
+}
 function mergeSettings(s){return {...defaultSettings, ...s, faq: s?.faq?.length ? s.faq : defaultSettings.faq}}
 
 function readImageFile(file){
@@ -71,7 +75,7 @@ function Toast({message, type, onClose}){
 }
 
 function App(){
-  const [route, setRoute] = useState(routeFromHash);
+  const [route, setRoute] = useState(()=>routeFromHash().path);
   const [products, setProducts] = useState(()=>load('mv_products', defaultProducts));
   const [orders, setOrders] = useState(()=>load('mv_orders', defaultOrders));
   const [cart, setCart] = useState(()=>load('mv_cart', []));
@@ -80,13 +84,13 @@ function App(){
   const [toast, setToast] = useState(null);
 
   useEffect(()=>{
-    const onHash = ()=>setRoute(routeFromHash());
+    const onHash = ()=>setRoute(routeFromHash().path);
     window.addEventListener('hashchange', onHash);
     return ()=>window.removeEventListener('hashchange', onHash);
   }, []);
 
   const notify = (message, type='success')=>setToast({message, type});
-  const navigate = (r)=>{location.hash=r; setRoute(r); window.scrollTo(0,0)};
+  const navigate = (r)=>{location.hash=r; setRoute(r.split('?')[0] || '/'); window.scrollTo(0,0)};
   const updateProducts = (next)=>{setProducts(next); save('mv_products', next)};
   const updateOrders = (next)=>{setOrders(next); save('mv_orders', next)};
   const updateCart = (next)=>{setCart(next); save('mv_cart', next)};
@@ -107,7 +111,7 @@ function App(){
   let page;
   if(route.startsWith('/admin')) page = <Admin {...ctx} route={route}/>;
   else if(route.startsWith('/product/')) page = <StoreLayout {...ctx}><ProductPage {...ctx} id={route.split('/').pop()}/></StoreLayout>;
-  else if(route==='/catalog') page = <StoreLayout {...ctx}><Catalog {...ctx}/></StoreLayout>;
+  else if(route.startsWith('/catalog')) page = <StoreLayout {...ctx}><Catalog {...ctx}/></StoreLayout>;
   else if(route==='/cart') page = <StoreLayout {...ctx}><Cart {...ctx}/></StoreLayout>;
   else if(route==='/about') page = <StoreLayout {...ctx}><AboutPage {...ctx}/></StoreLayout>;
   else if(route==='/contacts') page = <StoreLayout {...ctx}><ContactsPage {...ctx}/></StoreLayout>;
@@ -237,8 +241,14 @@ function ProductCard({p, navigate, addToCart}){
 
 function Catalog({products, navigate, addToCart}){
   const params = new URLSearchParams((location.hash.split('?')[1]) || '');
-  const [q, setQ] = useState(params.get('q') || '');
-  const [cat, setCat] = useState(params.get('cat') || '');
+  const [q, setQ] = useState(()=>params.get('q') || '');
+  const [cat, setCat] = useState(()=>params.get('cat') || '');
+
+  useEffect(()=>{
+    const p = new URLSearchParams((location.hash.split('?')[1]) || '');
+    setCat(p.get('cat') || '');
+    setQ(p.get('q') || '');
+  }, [location.hash]);
 
   const items = products.filter(p=>{
     const matchQ = !q || (p.title+p.category+p.description).toLowerCase().includes(q.toLowerCase());

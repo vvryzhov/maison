@@ -96,8 +96,11 @@ a{color:inherit}
 
 .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:24px}
 .card{background:#f3ede5;overflow:hidden}
-.cardImageBtn{position:relative;display:block;width:100%}
-.card img{width:100%;height:300px;object-fit:cover;background:#e8e0d5}
+.cardImageBtn{
+  position:relative;display:flex;align-items:center;justify-content:center;
+  width:100%;aspect-ratio:4/5;background:#e8e0d5;overflow:hidden
+}
+.card img{width:100%;height:100%;object-fit:contain}
 .cardBody{padding:18px}
 .card small{text-transform:uppercase;color:var(--muted);font-size:12px}
 .card h3{font-family:Georgia,serif;font-weight:400;font-size:21px;margin:8px 0}
@@ -143,7 +146,11 @@ footer{
 .product{
   display:grid;grid-template-columns:1.1fr .9fr;gap:70px;padding:70px 48px;align-items:start
 }
-.productGallery img{width:100%;max-height:720px;object-fit:cover}
+.productGallery{
+  display:flex;align-items:center;justify-content:center;
+  background:#ece6dc;min-height:520px;padding:24px
+}
+.productGallery img{width:100%;max-height:720px;object-fit:contain}
 .productInfo h1{font-family:Georgia,serif;font-size:52px;font-weight:400;line-height:1.05;margin:10px 0 18px}
 .productDesc{line-height:1.8;color:#3a342f;max-width:520px}
 .productInfo .btn{margin-right:12px;margin-top:8px}
@@ -153,7 +160,7 @@ footer{
   display:grid;grid-template-columns:90px 1fr auto auto auto;gap:20px;align-items:center;
   border-bottom:1px solid var(--line);padding:18px 0
 }
-.cartrow img{width:90px;height:90px;object-fit:cover}
+.cartrow img{width:90px;height:90px;object-fit:contain;background:#f0ebe3}
 .cartrow small{display:block;color:var(--muted);margin-top:4px}
 .qtyControl{display:flex;align-items:center;gap:10px;border:1px solid var(--line);padding:6px 10px;background:#fff}
 .cartPrice{font-weight:600;white-space:nowrap}
@@ -225,7 +232,7 @@ footer{
   display:grid;grid-template-columns:80px 1fr auto auto;gap:12px;align-items:center;
   background:#fff;border:1px solid var(--line);padding:12px
 }
-.row img{width:80px;height:80px;object-fit:cover}
+.row img{width:80px;height:80px;object-fit:contain;background:#f0ebe3}
 .row small{display:block;color:var(--muted)}
 .btn.danger{color:var(--danger);border-color:#d8b4b4}
 .order{
@@ -243,7 +250,7 @@ footer{
 .uploadZone.drag{border-color:var(--ink);background:#f1ebe3}
 .uploadPlaceholder{display:grid;justify-items:center;gap:8px;color:var(--muted);padding:24px;text-align:center}
 .uploadPlaceholder small{font-size:12px}
-.uploadPreview{width:100%;height:220px;object-fit:cover}
+.uploadPreview{width:100%;height:220px;object-fit:contain;background:#f0ebe3}
 .uploadActions{display:flex;gap:10px;margin:10px 0}
 .urlInput{margin-top:0}
 
