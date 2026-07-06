@@ -2,12 +2,15 @@ import cors from 'cors';
 import express from 'express';
 import fs from 'fs';
 import path from 'path';
+import {randomBytes} from 'crypto';
 
 const app = express();
 const PORT = 3000;
 const DATA_DIR = process.env.DATA_DIR || '/data';
 const STORE_FILE = path.join(DATA_DIR, 'store.json');
+const UPLOADS_DIR = path.join(DATA_DIR, 'uploads');
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'valery2026';
+const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
 
 const defaultStore = {
   products: [
@@ -42,6 +45,7 @@ const defaultStore = {
 
 function ensureDataDir(){
   if(!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, {recursive:true});
+  if(!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, {recursive:true});
 }
 
 function readStore(){
@@ -51,8 +55,14 @@ function readStore(){
     return structuredClone(defaultStore);
   }
   try{
-    return {...defaultStore, ...JSON.parse(fs.readFileSync(STORE_FILE, 'utf8'))};
-  }catch{
+    const parsed = JSON.parse(fs.readFileSync(STORE_FILE, 'utf8'));
+    return {
+      products: parsed.products ?? defaultStore.products,
+      orders: parsed.orders ?? defaultStore.orders,
+      settings: {...defaultStore.settings, ...(parsed.settings || {})}
+    };
+  }catch(err){
+    console.error('store read error', err);
     return structuredClone(defaultStore);
   }
 }
@@ -71,10 +81,48 @@ function checkAdmin(req, res){
   return true;
 }
 
+function parseDataUrl(image){
+  const match = String(image).match(/^data:image\/([\w+.-]+);base64,(.+)$/s);
+  if(!match) return null;
+  let ext = match[1].toLowerCase();
+  if(ext === 'jpeg') ext = 'jpg';
+  if(!['jpg','png','webp','gif'].includes(ext)) ext = 'jpg';
+  const buf = Buffer.from(match[2], 'base64');
+  return {ext, buf};
+}
+
+function saveUploadBuffer(buf, ext){
+  ensureDataDir();
+  const name = `${Date.now()}-${randomBytes(6).toString('hex')}.${ext}`;
+  fs.writeFileSync(path.join(UPLOADS_DIR, name), buf);
+  return `/api/uploads/${name}`;
+}
+
 app.use(cors());
-app.use(express.json({limit:'12mb'}));
+app.use(express.json({limit:'20mb'}));
 
 app.get('/api/health', (_req, res)=>res.json({ok:true}));
+
+app.get('/api/uploads/:name', (req, res)=>{
+  const name = path.basename(req.params.name);
+  const file = path.join(UPLOADS_DIR, name);
+  if(!name || !fs.existsSync(file)) return res.status(404).end();
+  res.sendFile(path.resolve(file));
+});
+
+app.post('/api/admin/upload', (req, res)=>{
+  if(!checkAdmin(req, res)) return;
+  const parsed = parseDataUrl(req.body?.image);
+  if(!parsed) return res.status(400).json({error:'Invalid image'});
+  if(parsed.buf.length > MAX_UPLOAD_BYTES) return res.status(400).json({error:'File too large'});
+  try{
+    const url = saveUploadBuffer(parsed.buf, parsed.ext);
+    res.json({url});
+  }catch(err){
+    console.error('upload error', err);
+    res.status(500).json({error:'Upload failed'});
+  }
+});
 
 app.get('/api/store', (_req, res)=>{
   const store = readStore();
@@ -103,8 +151,13 @@ app.put('/api/admin/store', (req, res)=>{
     orders: req.body.orders ?? current.orders,
     settings: {...current.settings, ...(req.body.settings || {})}
   };
-  writeStore(next);
-  res.json(next);
+  try{
+    writeStore(next);
+    res.json(next);
+  }catch(err){
+    console.error('store write error', err);
+    res.status(500).json({error:'Save failed'});
+  }
 });
 
 app.listen(PORT, ()=>console.log(`API listening on ${PORT}`));

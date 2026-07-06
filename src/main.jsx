@@ -11,7 +11,7 @@ const ADMIN_LOGIN = 'admin';
 const ADMIN_PASSWORD = 'valery2026';
 const CATEGORIES = ['Сумки', 'Аксессуары', 'Бренды', 'Новинки'];
 const ORDER_STATUSES = ['Новый', 'В обработке', 'Отправлен', 'Закрыт'];
-const MAX_IMAGE_SIZE = 2 * 1024 * 1024;
+const MAX_IMAGE_SIZE = 5 * 1024 * 1024;
 
 const defaultProducts = [
   {id:'mv-001', title:'Noir Top Handle Bag', category:'Сумки', price:285000, oldPrice:'', badge:'Новинка', image:'https://images.unsplash.com/photo-1594223274512-ad4803739b7c?q=80&w=1200&auto=format&fit=crop', description:'Структурированная сумка из зернистой кожи с лаконичной фурнитурой.'},
@@ -92,16 +92,44 @@ async function postOrder(order){
   return r.json();
 }
 
-function readImageFile(file){
+function compressImage(file, maxSide = 1400, quality = 0.82){
   return new Promise((resolve, reject)=>{
     if(!file?.type?.startsWith('image/')) return reject(new Error('Выберите файл изображения'));
-    if(file.size > MAX_IMAGE_SIZE) return reject(new Error('Файл больше 2 МБ. Сожмите изображение или укажите URL.'));
-    const reader = new FileReader();
-    reader.onload = ()=>resolve(reader.result);
-    reader.onerror = ()=>reject(new Error('Не удалось прочитать файл'));
-    reader.readAsDataURL(file);
+    if(file.size > MAX_IMAGE_SIZE) return reject(new Error('Файл больше 5 МБ'));
+    const blobUrl = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = ()=>{
+      URL.revokeObjectURL(blobUrl);
+      const scale = Math.min(1, maxSide / img.width, maxSide / img.height);
+      const w = Math.max(1, Math.round(img.width * scale));
+      const h = Math.max(1, Math.round(img.height * scale));
+      const canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, w, h);
+      ctx.drawImage(img, 0, 0, w, h);
+      resolve(canvas.toDataURL('image/jpeg', quality));
+    };
+    img.onerror = ()=>{ URL.revokeObjectURL(blobUrl); reject(new Error('Не удалось обработать изображение')); };
+    img.src = blobUrl;
   });
 }
+
+async function uploadProductImage(dataUrl){
+  const pass = adminPass();
+  if(!pass) throw new Error('Сначала войдите в админку');
+  const r = await fetch('/api/admin/upload', {
+    method:'POST',
+    headers:{'Content-Type':'application/json','X-Admin-Password':pass},
+    body:JSON.stringify({image: dataUrl})
+  });
+  const data = await r.json().catch(()=>({}));
+  if(!r.ok) throw new Error(data.error === 'File too large' ? 'Файл слишком большой' : 'Ошибка загрузки фото на сервер');
+  return data.url;
+}
+
 
 function Toast({message, type, onClose}){
   useEffect(()=>{const t=setTimeout(onClose, 3200); return ()=>clearTimeout(t)}, [onClose]);
@@ -176,7 +204,10 @@ function App(){
   const updateProducts = async (next)=>{
     setProducts(next);
     save('mv_products', next);
-    if(auth) await persistAdmin({products: next});
+    if(auth){
+      const ok = await persistAdmin({products: next});
+      if(!ok) throw new Error('save');
+    }
   };
   const updateOrders = async (next)=>{
     setOrders(next);
@@ -616,27 +647,38 @@ function Login({onLogin}){
 function ImageUploadField({value, onChange, onError}){
   const inputRef = useRef(null);
   const [drag, setDrag] = useState(false);
+  const [uploading, setUploading] = useState(false);
 
   const handleFile = async (file)=>{
-    try{ onChange(await readImageFile(file)); }
-    catch(err){ onError?.(err.message); }
+    try{
+      setUploading(true);
+      const dataUrl = await compressImage(file);
+      const url = await uploadProductImage(dataUrl);
+      onChange(url);
+    }catch(err){
+      onError?.(err.message);
+    }finally{
+      setUploading(false);
+    }
   };
 
   return <div className="imageUpload">
-    <label className={drag?'uploadZone drag':'uploadZone'} 
+    <label className={drag?'uploadZone drag':'uploadZone'}
       onDragOver={e=>{e.preventDefault(); setDrag(true)}}
       onDragLeave={()=>setDrag(false)}
       onDrop={e=>{e.preventDefault(); setDrag(false); const f=e.dataTransfer.files?.[0]; if(f) handleFile(f);}}>
-      {value
-        ? <img src={value} alt="Превью" className="uploadPreview"/>
-        : <div className="uploadPlaceholder"><ImageIcon size={28}/><span>Загрузить фото</span><small>JPG, PNG до 2 МБ</small></div>}
-      <input ref={inputRef} type="file" accept="image/*" hidden onChange={e=>{const f=e.target.files?.[0]; if(f) handleFile(f); e.target.value='';}}/>
+      {uploading
+        ? <div className="uploadPlaceholder"><span>Загрузка на сервер…</span></div>
+        : value
+          ? <img src={value} alt="Превью" className="uploadPreview"/>
+          : <div className="uploadPlaceholder"><ImageIcon size={28}/><span>Загрузить фото</span><small>JPG, PNG до 5 МБ</small></div>}
+      <input ref={inputRef} type="file" accept="image/*" hidden disabled={uploading} onChange={e=>{const f=e.target.files?.[0]; if(f) handleFile(f); e.target.value='';}}/>
     </label>
     <div className="uploadActions">
-      <button type="button" className="btn outline small" onClick={()=>inputRef.current?.click()}><Upload size={14}/> Выбрать файл</button>
-      {value && <button type="button" className="btn outline small" onClick={()=>onChange('')}>Удалить</button>}
+      <button type="button" className="btn outline small" disabled={uploading} onClick={()=>inputRef.current?.click()}><Upload size={14}/> Выбрать файл</button>
+      {value && !uploading && <button type="button" className="btn outline small" onClick={()=>onChange('')}>Удалить</button>}
     </div>
-    <input className="urlInput" placeholder="или вставьте URL изображения" value={value?.startsWith('data:')?'':(value||'')} onChange={e=>onChange(e.target.value)}/>
+    <input className="urlInput" placeholder="или вставьте URL изображения" disabled={uploading} value={value?.startsWith('http') ? value : ''} onChange={e=>onChange(e.target.value)}/>
   </div>;
 }
 
@@ -644,18 +686,28 @@ function ProductsAdmin({products, updateProducts, notify}){
   const blank = {id:'mv-'+Date.now(), title:'', category:'Сумки', price:'', oldPrice:'', badge:'', image:'', description:''};
   const [form, setForm] = useState(blank);
   const [err, setErr] = useState('');
+  const [saving, setSaving] = useState(false);
   const editing = products.some(p=>p.id===form.id && form.title);
 
-  const saveP = ()=>{
+  const saveP = async ()=>{
     if(!form.title.trim()) return setErr('Укажите название');
     if(!form.price) return setErr('Укажите цену');
     if(!form.image) return setErr('Добавьте фото или URL');
+    if(form.image.startsWith('data:')) return setErr('Дождитесь окончания загрузки фото');
     const payload = {...form, price:Number(form.price), oldPrice:form.oldPrice?Number(form.oldPrice):''};
     const exists = products.some(p=>p.id===form.id);
-    updateProducts(exists ? products.map(p=>p.id===form.id?payload:p) : [payload, ...products]);
-    setForm({...blank, id:'mv-'+Date.now()});
+    const next = exists ? products.map(p=>p.id===form.id?payload:p) : [payload, ...products];
+    setSaving(true);
     setErr('');
-    notify(editing ? 'Товар обновлён' : 'Товар добавлен');
+    try{
+      await updateProducts(next);
+      setForm({...blank, id:'mv-'+Date.now()});
+      notify(editing ? 'Товар обновлён' : 'Товар добавлен');
+    }catch{
+      setErr('Не удалось сохранить товар на сервере');
+    }finally{
+      setSaving(false);
+    }
   };
 
   const edit = (p)=>{setForm({...p}); setErr(''); window.scrollTo(0,0)};
@@ -684,7 +736,7 @@ function ProductsAdmin({products, updateProducts, notify}){
         <textarea rows={4} value={form.description} onChange={e=>setForm({...form,description:e.target.value})}/>
         {err && <p className="err">{err}</p>}
         <div className="rowActions">
-          <button className="btn dark" onClick={saveP}><Plus size={16}/> {editing?'Сохранить':'Добавить'}</button>
+          <button className="btn dark" disabled={saving} onClick={saveP}><Plus size={16}/> {saving ? 'Сохранение…' : (editing ? 'Сохранить' : 'Добавить')}</button>
           {editing && <button className="btn outline" onClick={reset}>Отмена</button>}
         </div>
       </div>
