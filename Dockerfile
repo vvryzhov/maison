@@ -2,10 +2,10 @@ FROM node:22-alpine AS build
 
 WORKDIR /app
 
-COPY package.json package-lock.json ./
-RUN npm ci
+COPY package.json .npmrc ./
+RUN npm install --no-audit --no-fund
 
-COPY index.html ./
+COPY index.html vite.config.js ./
 COPY src ./src
 COPY public ./public
 
