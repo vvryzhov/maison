@@ -257,7 +257,13 @@ footer{
 .faqEdit{padding:14px 0;border-top:1px solid var(--line)}
 .faqEdit textarea{margin-bottom:8px}
 
-.toast{
+.bootScreen{
+  min-height:100vh;display:grid;place-items:center;align-content:center;gap:10px;
+  background:var(--paper);text-transform:uppercase;letter-spacing:.12em
+}
+.bootScreen b{font-family:Georgia,serif;font-size:34px;font-weight:400}
+.bootScreen span{color:var(--muted);font-size:13px}
+
   position:fixed;right:24px;bottom:24px;z-index:100;padding:14px 18px;background:var(--accent);color:#fff;
   box-shadow:0 10px 30px rgba(0,0,0,.15);animation:toastIn .25s ease
 }

@@ -58,6 +58,40 @@ function routeFromHash(){
 }
 function mergeSettings(s){return {...defaultSettings, ...s, faq: s?.faq?.length ? s.faq : defaultSettings.faq}}
 
+function adminPass(){return sessionStorage.getItem('mv_admin_pass') || ''}
+
+async function fetchStore(){
+  const r = await fetch('/api/store');
+  if(!r.ok) throw new Error('store');
+  return r.json();
+}
+
+async function fetchAdminStore(pass){
+  const r = await fetch('/api/admin/store', {headers:{'X-Admin-Password':pass}});
+  if(!r.ok) throw new Error('admin');
+  return r.json();
+}
+
+async function saveAdminStore(pass, data){
+  const r = await fetch('/api/admin/store', {
+    method:'PUT',
+    headers:{'Content-Type':'application/json','X-Admin-Password':pass},
+    body:JSON.stringify(data)
+  });
+  if(!r.ok) throw new Error('save');
+  return r.json();
+}
+
+async function postOrder(order){
+  const r = await fetch('/api/orders', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify(order)
+  });
+  if(!r.ok) throw new Error('order');
+  return r.json();
+}
+
 function readImageFile(file){
   return new Promise((resolve, reject)=>{
     if(!file?.type?.startsWith('image/')) return reject(new Error('Выберите файл изображения'));
@@ -76,12 +110,39 @@ function Toast({message, type, onClose}){
 
 function App(){
   const [route, setRoute] = useState(()=>routeFromHash().path);
-  const [products, setProducts] = useState(()=>load('mv_products', defaultProducts));
-  const [orders, setOrders] = useState(()=>load('mv_orders', defaultOrders));
+  const [products, setProducts] = useState(defaultProducts);
+  const [orders, setOrders] = useState(defaultOrders);
   const [cart, setCart] = useState(()=>load('mv_cart', []));
-  const [settings, setSettings] = useState(()=>mergeSettings(load('mv_settings', null)));
+  const [settings, setSettings] = useState(()=>mergeSettings(null));
   const [auth, setAuth] = useState(()=>localStorage.getItem('mv_auth')==='true');
   const [toast, setToast] = useState(null);
+  const [ready, setReady] = useState(false);
+
+  useEffect(()=>{
+    fetchStore()
+      .then(data=>{
+        if(data.products?.length) setProducts(data.products);
+        if(data.settings) setSettings(mergeSettings(data.settings));
+      })
+      .catch(()=>{
+        setProducts(load('mv_products', defaultProducts));
+        setSettings(mergeSettings(load('mv_settings', null)));
+      })
+      .finally(()=>setReady(true));
+  }, []);
+
+  useEffect(()=>{
+    if(!auth) return;
+    const pass = adminPass();
+    if(!pass) return;
+    fetchAdminStore(pass)
+      .then(data=>{
+        if(data.products) setProducts(data.products);
+        if(data.orders) setOrders(data.orders);
+        if(data.settings) setSettings(mergeSettings(data.settings));
+      })
+      .catch(()=>notify('Не удалось загрузить данные админки', 'error'));
+  }, [auth]);
 
   useEffect(()=>{
     const onHash = ()=>setRoute(routeFromHash().path);
@@ -91,10 +152,64 @@ function App(){
 
   const notify = (message, type='success')=>setToast({message, type});
   const navigate = (r)=>{location.hash=r; setRoute(r.split('?')[0] || '/'); window.scrollTo(0,0)};
-  const updateProducts = (next)=>{setProducts(next); save('mv_products', next)};
-  const updateOrders = (next)=>{setOrders(next); save('mv_orders', next)};
+
+  const persistAdmin = async (patch)=>{
+    const pass = adminPass();
+    if(!pass) return false;
+    const body = {
+      products: patch.products ?? products,
+      orders: patch.orders ?? orders,
+      settings: patch.settings ?? settings
+    };
+    try{
+      const saved = await saveAdminStore(pass, body);
+      if(saved.products) setProducts(saved.products);
+      if(saved.orders) setOrders(saved.orders);
+      if(saved.settings) setSettings(mergeSettings(saved.settings));
+      return true;
+    }catch{
+      notify('Ошибка сохранения на сервере', 'error');
+      return false;
+    }
+  };
+
+  const updateProducts = async (next)=>{
+    setProducts(next);
+    save('mv_products', next);
+    if(auth) await persistAdmin({products: next});
+  };
+  const updateOrders = async (next)=>{
+    setOrders(next);
+    save('mv_orders', next);
+    if(auth) await persistAdmin({orders: next});
+  };
+  const updateSettings = async (next)=>{
+    const merged = mergeSettings(next);
+    setSettings(merged);
+    save('mv_settings', merged);
+    if(auth) await persistAdmin({settings: merged});
+  };
   const updateCart = (next)=>{setCart(next); save('mv_cart', next)};
-  const updateSettings = (next)=>{const merged=mergeSettings(next); setSettings(merged); save('mv_settings', merged)};
+
+  const handleLogin = async (password)=>{
+    sessionStorage.setItem('mv_admin_pass', password);
+    localStorage.setItem('mv_auth', 'true');
+    setAuth(true);
+    try{
+      const data = await fetchAdminStore(password);
+      setProducts(data.products || defaultProducts);
+      setOrders(data.orders || []);
+      setSettings(mergeSettings(data.settings));
+    }catch{
+      notify('Ошибка входа в админку', 'error');
+    }
+  };
+
+  const handleLogout = ()=>{
+    localStorage.removeItem('mv_auth');
+    sessionStorage.removeItem('mv_admin_pass');
+    setAuth(false);
+  };
 
   const addToCart = (p)=>{
     const existing = cart.find(x=>x.id===p.id);
@@ -106,7 +221,9 @@ function App(){
   };
 
   const cartCount = cart.reduce((s,p)=>s+(p.qty||1),0);
-  const ctx = {products, orders, cart, settings, auth, navigate, updateProducts, updateOrders, updateCart, updateSettings, setAuth, addToCart, notify, cartCount};
+  const ctx = {products, orders, cart, settings, auth, navigate, updateProducts, updateOrders, updateCart, updateSettings, setAuth, addToCart, notify, cartCount, handleLogin, handleLogout, persistAdmin};
+
+  if(!ready) return <div className="bootScreen"><b>{defaultSettings.brand}</b><span>Загрузка…</span></div>;
 
   let page;
   if(route.startsWith('/admin')) page = <Admin {...ctx} route={route}/>;
@@ -308,11 +425,16 @@ function Cart({cart, updateCart, updateOrders, orders, notify, navigate}){
     }).filter(p=>(p.qty||1)>0));
   };
 
-  const submitOrder = ()=>{
+  const submitOrder = async ()=>{
     if(!form.name.trim() || !form.phone.trim()) return setError('Укажите имя и телефон');
     const id = 'ORD-'+Date.now().toString().slice(-6);
     const item = {id, customer:form.name.trim(), phone:form.phone.trim(), email:form.email.trim(), total, status:'Новый', items:cart.map(p=>`${p.title} ×${p.qty||1}`).join(', '), comment:form.comment, createdAt:new Date().toISOString().slice(0,10)};
-    updateOrders([item, ...orders]);
+    try{
+      await postOrder(item);
+      setOrders(prev=>[item, ...prev]);
+    }catch{
+      updateOrders([item, ...orders]);
+    }
     updateCart([]);
     setCheckout(false);
     notify('Заказ оформлен. Мы свяжемся с вами.');
@@ -438,8 +560,8 @@ function Footer({settings, navigate}){
   </footer>;
 }
 
-function Admin({auth, setAuth, route, ...ctx}){
-  if(!auth) return <Login setAuth={setAuth}/>;
+function Admin({auth, handleLogout, route, ...ctx}){
+  if(!auth) return <Login onLogin={ctx.handleLogin}/>;
   const tab = route.includes('/orders') ? 'orders'
     : route.includes('/settings') ? 'settings'
     : route.includes('/content') ? 'content'
@@ -455,7 +577,7 @@ function Admin({auth, setAuth, route, ...ctx}){
       <AdminNavBtn active={tab==='content'} onClick={()=>ctx.navigate('/admin/content')} icon={FileText} label="Контент"/>
       <div className="adminSpacer"/>
       <AdminNavBtn onClick={()=>ctx.navigate('/')} icon={HomeIcon} label="На сайт"/>
-      <AdminNavBtn onClick={()=>{localStorage.removeItem('mv_auth'); setAuth(false)}} icon={LogOut} label="Выйти"/>
+      <AdminNavBtn onClick={handleLogout} icon={LogOut} label="Выйти"/>
     </aside>
     <section className="adminMain">
       {tab==='orders' && <OrdersAdmin {...ctx}/>}
@@ -470,19 +592,23 @@ function AdminNavBtn({active, onClick, icon:Icon, label}){
   return <button className={active?'adminNav active':'adminNav'} onClick={onClick}><Icon size={18}/> {label}</button>;
 }
 
-function Login({setAuth}){
-  const [l,setL]=useState(''), [p,setP]=useState(''), [e,setE]=useState('');
+function Login({onLogin}){
+  const [l,setL]=useState(''), [p,setP]=useState(''), [e,setE]=useState(''), [busy,setBusy]=useState(false);
+  const submit = async ()=>{
+    if(l!==ADMIN_LOGIN || p!==ADMIN_PASSWORD) return setE('Неверный логин или пароль');
+    setBusy(true); setE('');
+    try{ await onLogin(p); }
+    catch{ setE('Ошибка входа'); }
+    finally{ setBusy(false); }
+  };
   return <div className="login">
     <div className="loginCard">
       <h1>Admin</h1>
       <p className="loginSub">Maison Valery</p>
-      <input placeholder="Логин" value={l} onChange={x=>setL(x.target.value)} onKeyDown={ev=>ev.key==='Enter'&&document.getElementById('loginBtn')?.click()}/>
-      <input placeholder="Пароль" type="password" value={p} onChange={x=>setP(x.target.value)} onKeyDown={ev=>ev.key==='Enter'&&document.getElementById('loginBtn')?.click()}/>
+      <input placeholder="Логин" value={l} onChange={x=>setL(x.target.value)} onKeyDown={ev=>ev.key==='Enter'&&submit()}/>
+      <input placeholder="Пароль" type="password" value={p} onChange={x=>setP(x.target.value)} onKeyDown={ev=>ev.key==='Enter'&&submit()}/>
       {e && <p className="err">{e}</p>}
-      <button id="loginBtn" className="btn dark full" onClick={()=>{
-        if(l===ADMIN_LOGIN && p===ADMIN_PASSWORD){localStorage.setItem('mv_auth','true'); setAuth(true)}
-        else setE('Неверный логин или пароль');
-      }}>Войти</button>
+      <button className="btn dark full" disabled={busy} onClick={submit}>{busy?'Вход…':'Войти'}</button>
     </div>
   </div>;
 }
